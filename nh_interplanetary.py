@@ -3,6 +3,7 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 # UTILITIES ----------------------------------------------------------------------------------------
 def rad2deg(rad):
     return rad*(180/math.pi)
@@ -17,6 +18,30 @@ class Vec3D:
 
     def magnitude(self):
         return math.sqrt(self.x**2 + self.y**2 + self.z**2)
+
+    def dot_product(self, vec2):
+        return (self.x*vec2.x + self.y*vec2.y + self.z*vec2.z)
+
+    def __add__(self, vec2):
+        return Vec3D(self.x+vec2.x, self.y+vec2.y, self.z+vec2.z)
+    
+    def __sub__(self, vec2):
+        return Vec3D(self.x-vec2.x, self.y-vec2.y, self.z-vec2.z)
+
+    # def scalar_mult(self, scalar):
+    #     return Vec3D(scalar*self.x, scalar*self.y, scalar*self.z)
+    
+    def __mul__(self, scalar):
+        return Vec3D(scalar*self.x, scalar*self.y, scalar*self.z)
+
+    def __rmul__(self, scalar):
+        return Vec3D(scalar*self.x, scalar*self.y, scalar*self.z)
+
+    def cross_product(self, vec2):
+        i = (self.y*vec2.z - self.z*vec2.y)
+        j = -(self.z*vec2.x - self.x*vec2.z)
+        k = (self.x*vec2.y - self.y*vec2.x)
+        return Vec3D(i, j, k)
 
     def  __str__(self):
         return f"({self.x}, {self.y}, {self.z})"
@@ -57,8 +82,15 @@ class Planet:
         # gravitational parameter
         self.grav_p = grav_p
 
-        # positions
-        self.pos = Vec3D(0, 0, 0)
+    def get_position_at_time(self, time):
+        T = (2*PI)/(self.grav_p**2)*(self.ang_mom/(math.sqrt(1-self.ecc**2)))**3 # period
+        M = ((2*PI)/T)*time # mean anomaly
+        E = ecc_anom(M, self.ecc, 15) # eccentric anomaly
+        theta = 2*math.atan(math.sqrt( (1+self.ecc)/(1-self.ecc) ) * math.tan(E/2)) # true anomaly
+        r = ((self.ang_mom**2)/self.grav_p)*(1/(1+self.ecc * math.cos(theta))) # orbital equation
+
+        r_vec = q_transform(r, theta, self.arg_p, self.ra_an, self.inclination)
+        return r_vec
 
     def __str__(self):
         pr_str = f"\nPLANET {self.index}"
@@ -86,8 +118,15 @@ S_FAC = 2.0e8 # scaling factor for plotting
 
 t = 746000000 # global time variable (seconds)
 
-sun = Star("82 G. Eridani", 647001000, 1.59e30)
+sun = Star("82 G. Eridani", 647001000, 1.5900e30)
 planets = []
+
+# INTERPLANETARY TRAJECTORY VARIABLES
+P_DEPARTURE = 11
+P_ARRIVAL = 13
+Z_VAL_0 = 39.5
+DIRECTION = 1 # 1 for prograde, 0 for retrograde
+TRAVEL_TIME = 12 # in days
 
 
 # PROGRAM ------------------------------------------------------------------------------------------
@@ -141,25 +180,12 @@ def q_transform(factor, th, w, W, i):
     return Q
 
 
-# Calculate positions of planets
-for p in planets:
-    T = (2*PI)/(p.grav_p**2)*(p.ang_mom/(math.sqrt(1-p.ecc**2)))**3 # period
-    M = ((2*PI)/T)*t # mean anomaly
-    E = ecc_anom(M, p.ecc, 15) # eccentric anomaly
-    theta = 2*math.atan(math.sqrt( (1+p.ecc)/(1-p.ecc) ) * math.tan(E/2)) # true anomaly
-    r = ((p.ang_mom**2)/p.grav_p)*(1/(1+p.ecc * math.cos(theta))) # orbital equation
-
-    r_vec = q_transform(r, theta, p.arg_p, p.ra_an, p.inclination)
-    p.pos = r_vec
-
-
 # ORBITAL TRAJECTORY FUNCTIONS
 def x_p(t, r_p, a, b, w, W, i):
     x_p = ( 
         ((r_p - a) + a*np.cos(t))*(np.cos(W)*np.cos(w)-np.sin(W)*np.sin(w)*np.cos(i)) 
         + (b*np.sin(t))*(-np.cos(W)*np.sin(w)-np.sin(W)*np.cos(i)*np.cos(w))
         )
-    print(x_p)
     return x_p
 
 def y_p(t, r_p, a, b, w, W, i):
@@ -167,39 +193,196 @@ def y_p(t, r_p, a, b, w, W, i):
         ((r_p - a) + a*np.cos(t))*(np.sin(W)*np.cos(w)+np.cos(W)*np.cos(i)*np.sin(w))
         + (b*np.sin(t))*(-np.sin(W)*np.sin(w)+np.cos(W)*np.cos(i)*np.cos(w))
     )
-    print(y_p)
     return y_p
 
 def z_p(t, r_p, a, b, w, W, i):
     z_p = (
         ((r_p - a) + a*np.cos(t))*np.sin(i)*np.sin(w) 
         + (b*np.sin(t))*np.sin(i)*np.cos(w))
-    print(z_p)
     return z_p
 
-t_range = np.arange(0, 2*PI, PI/256)
+
+# INTERPLANETARY TRAJECTORY
+# Lambert's Problem
+grav_p_sun = CONST_G * sun.mass
+
+r_1 = planets[P_DEPARTURE-1].get_position_at_time(t) # position of departure
+r_2 = planets[P_ARRIVAL-1].get_position_at_time(t+TRAVEL_TIME*(24*3600)) # position of arrival
+
+# change in true anomaly:
+r_cross_vec = r_1.cross_product(r_2)
+r_Z = r_cross_vec.z  # (r_1.x*r_2.y - r_1.y*r_2.x)
+
+D_theta = 0
+if DIRECTION == 1:
+    if r_Z >= 0:
+        D_theta = math.acos( (r_1.dot_product(r_2)) / ( r_1.magnitude()*r_2.magnitude()) )
+    if r_Z < 0:
+        D_theta = 2*PI - math.acos( (r_1.dot_product(r_2)) / ( r_1.magnitude()*r_2.magnitude()) )
+elif DIRECTION == 0:
+    if r_Z < 0:
+        D_theta = math.acos( (r_1.dot_product(r_2)) / ( r_1.magnitude()*r_2.magnitude()) )
+    if r_Z >= 0:
+        D_theta = 2*PI - math.acos( (r_1.dot_product(r_2)) / ( r_1.magnitude()*r_2.magnitude()) )
+
+# "A" value
+A = math.sin(D_theta)*math.sqrt( (r_1.magnitude()*r_2.magnitude()) / (1-math.cos(D_theta)) )
+
+inf_max = 30 # max iterations for infinite series
+
+def S_func(z, max):
+    output = 0
+    for k in range(0, inf_max):
+        output += ( (-1)**k ) * ( (z**k) / math.factorial((2*k + 3)) )
+    return output
+
+def C_func(z, max):
+    output = 0
+    for k in range(0, inf_max):
+        output += ( (-1)**k ) * ( (z**k) / math.factorial((2*k + 2)) )
+    return output
+
+def y_func(z):
+    return r_1.magnitude() + r_2.magnitude() + A * (
+        ( z * S_func(z, inf_max) - 1 ) / ( math.sqrt(C_func(z, inf_max)) )
+        )
+
+def F_func(z):
+    return (
+        ( math.pow(( (y_func(z)) / (C_func(z, inf_max)) ), (3/2)) )
+        *S_func(z, inf_max) + A*(math.sqrt(y_func(z)))
+        - math.sqrt(grav_p_sun)*(TRAVEL_TIME*(24*3600))
+    )
+
+def F_der_func(z):
+    output = 0
+
+    if abs(z) > 0:
+        output = (
+            math.pow(( y_func(z) / C_func(z, inf_max) ), (3/2))
+            * (
+                (1/(2*z))
+                * ( C_func(z, inf_max) - (3/2)*( S_func(z, inf_max) / C_func(z, inf_max) ) )
+                + (3/4) * ( (S_func(z, inf_max)**2) / C_func(z, inf_max) )
+            )
+            + (A/8) * ( 3 * ( S_func(z, inf_max) / C_func(z, inf_max) ) * math.sqrt(y_func(z)) )
+        )
+    elif z == 0:
+        output = -(7/240)
+    
+    return output
+
+
+def calculate_z_final(z_start, iterations):
+    z_current = 0
+    z_previous = z_start
+    for i in range(0, iterations):
+        z_current = z_previous - ( F_func(z_previous) / F_der_func(z_previous))
+        z_previous = z_current
+    return z_current
+
+z_final = calculate_z_final(39.5, 5)
+
+# z_1 = Z_VAL_0 - F_func(Z_VAL_0)/F_der_func(Z_VAL_0)
+# z_2 = z_1 - F_func(z_1)/F_der_func(z_1)
+# z_3 = z_2 - F_func(z_2)/F_der_func(z_2)
+# z_4 = z_3 - F_func(z_3)/F_der_func(z_3)
+# z_final = z_4 - F_func(z_4)/F_der_func(z_4)
+
+# lagrange functions
+y_val = y_func(z_final)
+
+lag_f = 1 - y_val/r_1.magnitude()
+lag_g = A * math.sqrt(y_val / grav_p_sun)
+lag_gt = 1 - y_val/r_2.magnitude()
+
+# velocity vectors
+v_1 = (1/lag_g)*(r_2 - lag_f*r_1)
+v_2 = (1/lag_g)*(lag_gt*r_2 - r_1)
+
+
+
+# trajectory elements
+ang_mom_T_vec = r_1.cross_product(v_1)
+ang_mom_T = ang_mom_T_vec.magnitude()
+
+inc_T = 2*PI - math.acos( (ang_mom_T_vec.z)/ang_mom_T )
+
+N_vec = Vec3D( (-1*ang_mom_T_vec.y), (-1*ang_mom_T_vec.x), 0 )
+N = N_vec.magnitude()
+
+ra_an_T = 0
+if N_vec.y >= 0:
+    ra_an_T = math.acos(N_vec.x/N)
+else:
+    ra_an_T = 2*PI - math.acos(N_vec.x/N)
+
+v_1_r = (r_1.dot_product(v_1))/r_1.magnitude() # radial velocity
+
+ecc_T_vec = (1/grav_p_sun)*( (v_1.magnitude()**2 - (grav_p_sun/r_1.magnitude()))*r_1 - (r_1.magnitude()*v_1_r*v_1) )
+ecc_T = ecc_T_vec.magnitude()
+
+arg_p_T = 2*PI
+if ecc_T_vec.z >= 0:
+    arg_p_T -= math.acos( N_vec.dot_product(ecc_T_vec)/(N*ecc_T) )
+else:
+    arg_p_T -= 2*PI - math.acos( N_vec.dot_product(ecc_T_vec)/(N*ecc_T) )
+
+
+a_T = ((ang_mom_T**2)/grav_p_sun)*(1/(1 - ecc_T**2))
+b_T = a_T*math.sqrt(1 - ecc_T**2)
+r_p_T = (ang_mom_T**2/grav_p_sun)*(1/(1 + ecc_T))
+
+
+# print Velocity Information
+a_1 = ((planets[P_DEPARTURE-1].ang_mom**2)/planets[P_DEPARTURE-1].grav_p)*(1/(1-planets[P_DEPARTURE-1].ecc**2))
+a_2 = ((planets[P_ARRIVAL-1].ang_mom**2)/planets[P_ARRIVAL-1].grav_p)*(1/(1-planets[P_ARRIVAL-1].ecc**2))
+
+v_he_departure = v_1.magnitude() - math.sqrt( 
+    planets[P_DEPARTURE-1].grav_p * ( 2/r_1.magnitude() - 1/a_1) 
+    )
+
+v_he_arrival = math.sqrt( 
+    planets[P_ARRIVAL-1].grav_p * ( 2/r_2.magnitude() - 1/a_2) 
+    ) - v_2.magnitude()
+
+print("Hyperbolic Excess Speeds:")
+print(f" - Departure:  {round(v_he_departure)} m/s")
+print(f" - Arrival:   {round(v_he_arrival)} m/s")
+
 
 
 # DRAW PLOT ----------------------------------------------------------------------------------------
-x = [0]
-y = [0,]
-
-colours = ['r']
+x_departure = []
+y_departure = []
+colours_departure = []
+x_arrival = []
+y_arrival = []
+colours_arrival = []
 
 for p in planets:
-    x.append(p.pos.x / S_FAC)
-    y.append(p.pos.y / S_FAC)
-    colours.append("b")
+    x_departure.append(p.get_position_at_time(t).x / S_FAC)
+    y_departure.append(p.get_position_at_time(t).y / S_FAC)
+    colours_departure.append("b")
+
+for p in planets:
+    x_arrival.append(p.get_position_at_time(t+TRAVEL_TIME*(24*3600)).x / S_FAC)
+    y_arrival.append(p.get_position_at_time(t+TRAVEL_TIME*(24*3600)).y / S_FAC)
+    colours_arrival.append("g")
 
 # Select length of axes and the space between tick labels
 xmin, xmax, ymin, ymax = -60000, 60000, -60000, 60000
 ticks_frequency = 5000
 
-# Plot points
+# Plot planet points
 fig, ax = plt.subplots(figsize=(10, 10))
-ax.scatter(x, y, c=colours)
+ax.scatter(0, 0, c="r")
+ax.scatter(x_departure, y_departure, c=colours_departure)
+ax.scatter(x_arrival, y_arrival, c=colours_arrival)
 
-# Plot trajectories
+# Plot planet trajectories
+t_range = np.arange(0, 2*PI, PI/256)
+
 for p in planets:
     a = ((p.ang_mom**2)/p.grav_p)*(1/(1-p.ecc**2)) # semimajor axis
     b = a*math.sqrt(1-p.ecc**2) # semiminor axis
@@ -209,6 +392,14 @@ for p in planets:
         x_p(t_range, r_p/S_FAC, a/S_FAC, b/S_FAC, p.arg_p, p.ra_an, p.inclination),
         y_p(t_range, r_p/S_FAC, a/S_FAC, b/S_FAC, p.arg_p, p.ra_an, p.inclination)
         )
+
+# Plot transfer trajectory
+t_range_high = np.arange(0, 2*PI, PI/65536)
+
+plt.plot(
+    x_p(t_range_high, r_p_T/S_FAC, a_T/S_FAC, b_T/S_FAC, arg_p_T, ra_an_T, inc_T),
+    y_p(t_range_high, r_p_T/S_FAC, a_T/S_FAC, b_T/S_FAC, arg_p_T, ra_an_T, inc_T)
+    )
 
 # Set identical scales for both axes
 ax.set(xlim=(xmin-1, xmax+1), ylim=(ymin-1, ymax+1), aspect='equal')

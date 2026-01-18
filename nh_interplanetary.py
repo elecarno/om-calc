@@ -122,11 +122,14 @@ sun = Star("82 G. Eridani", 647001000, 1.5900e30)
 planets = []
 
 # INTERPLANETARY TRAJECTORY VARIABLES
-P_DEPARTURE = 11
-P_ARRIVAL = 13
+P_DEPARTURE = 8
+P_ARRIVAL = 9
 Z_VAL_0 = 39.5
 DIRECTION = 1 # 1 for prograde, 0 for retrograde
-TRAVEL_TIME = 12 # in days
+TRAVEL_TIME = 90 # in days
+ALTITUDE_DEP = 5e7 # altitude of circular parking orbit for departure
+ALTITUDE_ARR = 5e7 # altitude of periapsis of arrival orbit
+ECC_ARR = 0.4 # eccentricity of arrival orbit
 
 
 # PROGRAM ------------------------------------------------------------------------------------------
@@ -346,10 +349,48 @@ v_he_arrival = math.sqrt(
     planets[P_ARRIVAL-1].grav_p * ( 2/r_2.magnitude() - 1/a_2) 
     ) - v_2.magnitude()
 
+print(f"{planets[P_DEPARTURE-1].name} to {planets[P_ARRIVAL-1].name} in {TRAVEL_TIME} days")
+print("-------------------------------------------------------------")
+
 print("Hyperbolic Excess Speeds:")
 print(f" - Departure:  {round(v_he_departure)} m/s")
 print(f" - Arrival:   {round(v_he_arrival)} m/s")
 
+print("Trajectory Elements:")
+print(f" - Angular Mom.:    {round(ang_mom_T)} m^2/s")
+print(f" - Eccentricity:    {ecc_T}")
+print(f" - Inclination:     {round(inc_T * (180/PI))} deg")
+print(f" - RA of Asc. Node: {round(ra_an_T * (180/PI))} deg")
+print(f" - Arg. of Peri.:   {round(arg_p_T * (180/PI))} deg")
+
+
+# DEPARTURE DELTA-V
+grav_p_dep = CONST_G * planets[P_DEPARTURE-1].mass # grav p of spacecraft around departure planet.
+r_p_dep = planets[P_DEPARTURE-1].radius + ALTITUDE_DEP # periapsis radius of departure, also height of circular parking orbit.
+
+ang_mom_D = r_p_dep * math.sqrt( v_he_departure**2 + (2*grav_p_dep)/(r_p_dep) )
+# ecc_D = 1 + (r_p_dep * (v_he_departure**2))/(grav_p_dep)
+# a_D = ((ang_mom_D**2)/(grav_p_dep))*(1/(ecc_D**2 - 1))
+# b_D = a_D * math.sqrt(ecc_D**2 - 1)
+v_p_dep = ang_mom_D/r_p_dep
+v_c_dep = math.sqrt( grav_p_dep / r_p_dep )
+
+delta_v_departure = v_p_dep - v_c_dep
+
+
+# ARRIVAL DELTA-V
+grav_p_arr = CONST_G * planets[P_ARRIVAL-1].mass
+r_p_arr = planets[P_ARRIVAL-1].radius + ALTITUDE_ARR
+
+v_p_hyperbola_arr = math.sqrt( v_he_arrival**2 + (2*grav_p_arr)/(r_p_arr) )
+v_p_capture_arr = math.sqrt( (grav_p_arr*(1+ECC_ARR))/r_p_arr )
+
+delta_v_arrival = v_p_hyperbola_arr - v_p_capture_arr
+
+print("Delta-v:")
+print(f" - Departure:  {round(delta_v_departure)} m/s")
+print(f" - Arrival:    {round(delta_v_arrival)} m/s")
+print(f" - Total:      {round(delta_v_departure + delta_v_arrival)} m/s")
 
 
 # DRAW PLOT ----------------------------------------------------------------------------------------
@@ -372,13 +413,12 @@ for p in planets:
 
 # Select length of axes and the space between tick labels
 xmin, xmax, ymin, ymax = -60000, 60000, -60000, 60000
-ticks_frequency = 5000
 
 # Plot planet points
 fig, ax = plt.subplots(figsize=(10, 10))
-ax.scatter(0, 0, c="r")
-ax.scatter(x_departure, y_departure, c=colours_departure)
-ax.scatter(x_arrival, y_arrival, c=colours_arrival)
+ax.scatter(0, 0, c="r", zorder=1)
+ax.scatter(x_departure, y_departure, c=colours_departure, zorder=1)
+ax.scatter(x_arrival, y_arrival, c=colours_arrival, zorder=1)
 
 # Plot planet trajectories
 t_range = np.arange(0, 2*PI, PI/256)
@@ -390,7 +430,8 @@ for p in planets:
 
     plt.plot(
         x_p(t_range, r_p/S_FAC, a/S_FAC, b/S_FAC, p.arg_p, p.ra_an, p.inclination),
-        y_p(t_range, r_p/S_FAC, a/S_FAC, b/S_FAC, p.arg_p, p.ra_an, p.inclination)
+        y_p(t_range, r_p/S_FAC, a/S_FAC, b/S_FAC, p.arg_p, p.ra_an, p.inclination),
+        "0.8", zorder=0
         )
 
 # Plot transfer trajectory
@@ -398,7 +439,8 @@ t_range_high = np.arange(0, 2*PI, PI/65536)
 
 plt.plot(
     x_p(t_range_high, r_p_T/S_FAC, a_T/S_FAC, b_T/S_FAC, arg_p_T, ra_an_T, inc_T),
-    y_p(t_range_high, r_p_T/S_FAC, a_T/S_FAC, b_T/S_FAC, arg_p_T, ra_an_T, inc_T)
+    y_p(t_range_high, r_p_T/S_FAC, a_T/S_FAC, b_T/S_FAC, arg_p_T, ra_an_T, inc_T),
+    "r", zorder=1
     )
 
 # Set identical scales for both axes

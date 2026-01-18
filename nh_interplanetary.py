@@ -122,11 +122,11 @@ sun = Star("82 G. Eridani", 647001000, 1.5900e30)
 planets = []
 
 # INTERPLANETARY TRAJECTORY VARIABLES
-P_DEPARTURE = 8
-P_ARRIVAL = 9
+P_DEPARTURE = 2
+P_ARRIVAL = 3
 Z_VAL_0 = 39.5
 DIRECTION = 1 # 1 for prograde, 0 for retrograde
-TRAVEL_TIME = 90 # in days
+TRAVEL_TIME = 65 # in days
 ALTITUDE_DEP = 5e7 # altitude of circular parking orbit for departure
 ALTITUDE_ARR = 5e7 # altitude of periapsis of arrival orbit
 ECC_ARR = 0.4 # eccentricity of arrival orbit
@@ -233,75 +233,125 @@ A = math.sin(D_theta)*math.sqrt( (r_1.magnitude()*r_2.magnitude()) / (1-math.cos
 
 inf_max = 30 # max iterations for infinite series
 
-def S_func(z, max):
-    output = 0
-    for k in range(0, inf_max):
-        output += ( (-1)**k ) * ( (z**k) / math.factorial((2*k + 3)) )
-    return output
+def stumpff_C(z):
+    if z > 0:
+        return (1 - math.cos(math.sqrt(z))) / z
+    elif z < 0:
+        return (math.cosh(math.sqrt(-z)) - 1) / (-z)
+    else:
+        return 0.5
 
-def C_func(z, max):
-    output = 0
-    for k in range(0, inf_max):
-        output += ( (-1)**k ) * ( (z**k) / math.factorial((2*k + 2)) )
-    return output
+def stumpff_S(z):
+    if z > 0:
+        return (math.sqrt(z) - math.sin(math.sqrt(z))) / (z**1.5)
+    elif z < 0:
+        return (math.sinh(math.sqrt(-z)) - math.sqrt(-z)) / ((-z)**1.5)
+    else:
+        return 1/6
 
-def y_func(z):
-    return r_1.magnitude() + r_2.magnitude() + A * (
-        ( z * S_func(z, inf_max) - 1 ) / ( math.sqrt(C_func(z, inf_max)) )
-        )
+# lambert's solver annoyingly rewritten for me by chatgpt because my initial version
+# was actually rather awful. Need to redo this myself one day
+def lambert_tof_min(r1, r2, mu, dtheta):
+    c = math.sqrt(r1*r1 + r2*r2 - 2*r1*r2*math.cos(dtheta))
+    s = 0.5 * (r1 + r2 + c)
+    a_min = 0.5 * s
 
-def F_func(z):
-    return (
-        ( math.pow(( (y_func(z)) / (C_func(z, inf_max)) ), (3/2)) )
-        *S_func(z, inf_max) + A*(math.sqrt(y_func(z)))
-        - math.sqrt(grav_p_sun)*(TRAVEL_TIME*(24*3600))
-    )
+    beta = 2 * math.asin(math.sqrt((s - c)/s))
+    tof_min = math.sqrt(a_min**3 / mu) * (math.pi - (beta - math.sin(beta)))
+    return tof_min
 
-def F_der_func(z):
-    output = 0
+def lambert_universal(r1, r2, tof, mu, prograde=True, tol=1e-8, max_iter=1000):
+    r1_mag = r1.magnitude()
+    r2_mag = r2.magnitude()
 
-    if abs(z) > 0:
-        output = (
-            math.pow(( y_func(z) / C_func(z, inf_max) ), (3/2))
-            * (
-                (1/(2*z))
-                * ( C_func(z, inf_max) - (3/2)*( S_func(z, inf_max) / C_func(z, inf_max) ) )
-                + (3/4) * ( (S_func(z, inf_max)**2) / C_func(z, inf_max) )
-            )
-            + (A/8) * ( 3 * ( S_func(z, inf_max) / C_func(z, inf_max) ) * math.sqrt(y_func(z)) )
-        )
-    elif z == 0:
-        output = -(7/240)
-    
-    return output
+    cos_dtheta = r1.dot_product(r2) / (r1_mag * r2_mag)
+    cos_dtheta = max(-1.0, min(1.0, cos_dtheta))
+    dtheta = math.acos(cos_dtheta)
 
+    cross_z = r1.cross_product(r2).z
+    if prograde:
+        if cross_z < 0:
+            dtheta = 2*math.pi - dtheta
+    else:
+        if cross_z >= 0:
+            dtheta = 2*math.pi - dtheta
 
-def calculate_z_final(z_start, iterations):
-    z_current = 0
-    z_previous = z_start
-    for i in range(0, iterations):
-        z_current = z_previous - ( F_func(z_previous) / F_der_func(z_previous))
-        z_previous = z_current
-    return z_current
+    A = math.sin(dtheta) * math.sqrt(r1_mag * r2_mag / (1 - math.cos(dtheta)))
+    if abs(A) < 1e-12:
+        raise RuntimeError("Lambert singularity (A≈0)")
 
-z_final = calculate_z_final(39.5, 5)
+    def time_eq(z):
+        C = stumpff_C(z)
+        S = stumpff_S(z)
 
-# z_1 = Z_VAL_0 - F_func(Z_VAL_0)/F_der_func(Z_VAL_0)
-# z_2 = z_1 - F_func(z_1)/F_der_func(z_1)
-# z_3 = z_2 - F_func(z_2)/F_der_func(z_2)
-# z_4 = z_3 - F_func(z_3)/F_der_func(z_3)
-# z_final = z_4 - F_func(z_4)/F_der_func(z_4)
+        if C <= 0:
+            return None, None
 
-# lagrange functions
-y_val = y_func(z_final)
+        y = r1_mag + r2_mag + A * (z*S - 1) / math.sqrt(C)
+        if y <= 0:
+            return None, None
 
-lag_f = 1 - y_val/r_1.magnitude()
-lag_g = A * math.sqrt(y_val / grav_p_sun)
-lag_gt = 1 - y_val/r_2.magnitude()
+        F = ((y / C)**1.5) * S + A * math.sqrt(y) - math.sqrt(mu) * tof
+        return F, y
+
+    # --- Bracket z ---
+    z_low = -4 * math.pi**2
+    z_high = 4 * math.pi**2
+
+    for _ in range(50):
+        F_low, _ = time_eq(z_low)
+        F_high, _ = time_eq(z_high)
+        if F_low is not None and F_high is not None and F_low * F_high < 0:
+            break
+        z_low *= 1.2
+        z_high *= 1.2
+    else:
+        raise RuntimeError("Failed to bracket Lambert solution")
+
+    # --- Bisection ---
+    for _ in range(max_iter):
+        z = 0.5 * (z_low + z_high)
+        F, y = time_eq(z)
+
+        if F is None:
+            z_low = z
+            continue
+
+        if abs(F) < tol:
+            break
+
+        F_low, _ = time_eq(z_low)
+        if F_low * F < 0:
+            z_high = z
+        else:
+            z_low = z
+
+    # --- Lagrange coefficients ---
+    f = 1 - y / r1_mag
+    g = A * math.sqrt(y / mu)
+    gdot = 1 - y / r2_mag
+
+    v1 = (1/g) * (r2 - f*r1)
+    v2 = (1/g) * (gdot*r2 - r1)
+
+    return v1, v2
 
 # velocity vectors
-v_1 = (1/lag_g)*(r_2 - lag_f*r_1)
-v_2 = (1/lag_g)*(lag_gt*r_2 - r_1)
+tof = TRAVEL_TIME * 24 * 3600
+
+tof_min = lambert_tof_min(
+    r_1.magnitude(),
+    r_2.magnitude(),
+    grav_p_sun,
+    D_theta
+)
+if tof < tof_min:
+    raise RuntimeError(f"TOF below minimum-energy Lambert transfer of {tof_min/(24*3600)}")
+
+try:
+    v_1, v_2 = lambert_universal(r_1, r_2, tof, grav_p_sun, prograde=True)
+except RuntimeError:
+    v_1, v_2 = lambert_universal(r_1, r_2, tof, grav_p_sun, prograde=False)
 
 
 
@@ -409,7 +459,7 @@ for p in planets:
 for p in planets:
     x_arrival.append(p.get_position_at_time(t+TRAVEL_TIME*(24*3600)).x / S_FAC)
     y_arrival.append(p.get_position_at_time(t+TRAVEL_TIME*(24*3600)).y / S_FAC)
-    colours_arrival.append("g")
+    colours_arrival.append("r")
 
 # Select length of axes and the space between tick labels
 xmin, xmax, ymin, ymax = -60000, 60000, -60000, 60000

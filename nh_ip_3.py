@@ -347,7 +347,7 @@ if __name__ == "__main__":
 
     # PARAMETERS ---------------------------------------------------------------
     P_DEP, P_ARR = 2, 8
-    TRAVEL_DAYS = 90
+    TRAVEL_DAYS = 120
     TRAVEL_TIME = TRAVEL_DAYS*(24*3600)
     t_0 = 746000000
 
@@ -384,8 +384,8 @@ if __name__ == "__main__":
     mu_sun = G*sun.mass
 
     print("Trajectory Elements:")
-    print(f" - Angular Mom.:    {round(h_Tr)} m^2/s")
-    print(f" - Eccentricity:    {e_Tr}")
+    print(f" - Angular Mom.:    {round(h_Tr):.4e} m^2/s")
+    print(f" - Eccentricity:    {round(e_Tr, 4)}")
     print(f" - Inclination:     {round(i_Tr * (180/PI))} deg")
     print(f" - RA of Asc. Node: {round(W_Tr * (180/PI))} deg")
     print(f" - Arg. of Peri.:   {round(w_Tr * (180/PI))} deg")

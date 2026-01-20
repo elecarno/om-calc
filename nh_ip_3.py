@@ -97,6 +97,13 @@ class Planet:
         r = (self.h**2 / self.mu) * (1 / (1 + self.e*math.cos(theta)))
         return self.orbital_to_cartesian(r, theta)
 
+    def true_anomaly(self, t, max_iter=15):
+        T = ( (2*PI)/(self.mu**2) ) * (self.h/math.sqrt(1-self.e**2))**3 # period of the orbit
+        M = (2*PI/T) * t # mean anomaly
+        E = self.eccentric_anomaly(M, self.e, max_iter)
+        theta = 2*math.atan(math.sqrt((1+self.e)/(1-self.e)) * math.tan(E/2))
+        return theta
+
     @staticmethod
     def eccentric_anomaly(M, e, max_iter=15):
         E = M
@@ -418,11 +425,6 @@ if __name__ == "__main__":
 
     delta_v_arrival = v_p_hyperbola_arr - v_p_capture_arr
 
-    print("Delta-v:")
-    print(f" - Departure:  {round(delta_v_departure)} m/s")
-    print(f" - Arrival:    {round(delta_v_arrival)} m/s")
-    print(f" - Total:      {round(delta_v_departure + delta_v_arrival)} m/s")
-
 
     # Plots --------------------------------------------------------------------
     fig, ax = plt.subplots(figsize=(10, 10))
@@ -448,7 +450,7 @@ if __name__ == "__main__":
 
 
     # Planet Orbits
-    t_range = np.arange(0, 2*PI, PI/256)
+    t_range = np.arange(0, 2*PI, PI/512)
     for p in planets:
         a = ((p.h**2)/p.mu)*(1/(1-p.e**2)) # semimajor axis
         b = a*math.sqrt(1-p.e**2) # semiminor axis
@@ -479,17 +481,30 @@ if __name__ == "__main__":
         nu_arr = true_anomaly_from_state(r_2, v_2, mu_sun)
         if nu_arr < nu_dep:
             nu_arr += 2*math.pi
-        nu_plot = np.linspace(nu_dep, nu_arr, 5000)
+        nu_plot = np.linspace(nu_dep, nu_arr, 4096)
 
         print("True Anomalies:")
-        print(f" - Departure: {round(nu_dep, 2)} rad ({round(rad2deg(nu_dep), 2)})")
-        print(f" - Arrival:   {round(nu_arr, 2)} rad ({round(rad2deg(nu_arr), 2)})")
+        print(f" - Traj Dep:  {round(nu_dep, 2)} rad ({round(rad2deg(nu_dep), 2)} deg)")
+        print(f" - Traj Arr:  {round(nu_arr, 2)} rad ({round(rad2deg(nu_arr), 2)} deg)")
+
+        p_dep_anom = planets[P_DEP-1].true_anomaly(t_0)
+        p_arr_anom = planets[P_ARR-1].true_anomaly(t_0+TRAVEL_TIME)
+
+        print(f" - Planet Dep:  {round(p_dep_anom, 2)} rad ({round(rad2deg(p_dep_anom), 2)} deg)")
+        print(f" - Planet Arr:  {round(p_arr_anom, 2)} rad ({round(rad2deg(p_arr_anom), 2)} deg)")
 
         x, y, z = hyperbolic_orbit_xyz(
             nu_plot, h_Tr, e_Tr, mu_sun, w_Tr, W_Tr, i_Tr
         )
 
         plt.plot(x/S_FAC, y/S_FAC, 'r', linewidth=2, zorder=3)
+
+
+    # Print Delta-v Data
+    print("Delta-v:")
+    print(f" - Departure:  {round(delta_v_departure)} m/s")
+    print(f" - Arrival:    {round(delta_v_arrival)} m/s")
+    print(f" - Total:      {round(delta_v_departure + delta_v_arrival)} m/s")
     
 
     ax.set_title(f"Hyperbolic Transfer from {planets[P_DEP-1].name} to {planets[P_ARR-1].name} in {TRAVEL_DAYS} days")

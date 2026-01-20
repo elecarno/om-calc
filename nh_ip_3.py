@@ -346,10 +346,10 @@ if __name__ == "__main__":
 
 
     # PARAMETERS ---------------------------------------------------------------
-    P_DEP, P_ARR = 2, 8
-    TRAVEL_DAYS = 120
+    P_DEP, P_ARR = 3, 5
+    TRAVEL_DAYS = 80
     TRAVEL_TIME = TRAVEL_DAYS*(24*3600)
-    t_0 = 746000000
+    t_0 = 158112000
 
     ALTITUDE_DEP = 5e7 # altitude of circular parking orbit for departure
     ALTITUDE_ARR = 5e7 # altitude of periapsis of arrival orbit
@@ -466,13 +466,7 @@ if __name__ == "__main__":
         nu = np.linspace(-nu_max, nu_max, 10000)
 
         x, y, z = hyperbolic_orbit_xyz(
-            nu,
-            h_Tr,
-            e_Tr,
-            mu_sun,
-            w_Tr,
-            W_Tr,
-            i_Tr
+            nu, h_Tr, e_Tr, mu_sun, w_Tr, W_Tr, i_Tr
         )
 
         plt.plot(x/S_FAC, y/S_FAC, 'r', linewidth=2, zorder=3)
@@ -487,14 +481,12 @@ if __name__ == "__main__":
             nu_arr += 2*math.pi
         nu_plot = np.linspace(nu_dep, nu_arr, 5000)
 
+        print("True Anomalies:")
+        print(f" - Departure: {round(nu_dep, 2)} rad ({round(rad2deg(nu_dep), 2)})")
+        print(f" - Arrival:   {round(nu_arr, 2)} rad ({round(rad2deg(nu_arr), 2)})")
+
         x, y, z = hyperbolic_orbit_xyz(
-            nu_plot,
-            h_Tr,
-            e_Tr,
-            mu_sun,
-            w_Tr,
-            W_Tr,
-            i_Tr
+            nu_plot, h_Tr, e_Tr, mu_sun, w_Tr, W_Tr, i_Tr
         )
 
         plt.plot(x/S_FAC, y/S_FAC, 'r', linewidth=2, zorder=3)
